@@ -1,13 +1,228 @@
 #!/usr/bin/env python3
-# chntpw-gui-autoinstall.py – Windows Passwort Finder mit automatischer Abhängigkeitsinstallation
+# chntpw-gui.py – Windows Passwort Finder mit automatischer Abhängigkeitsinstallation
+# Version 1.06 – Mehrsprachig (DE/EN) + verbesserte Menüleiste
 
 import os
 import sys
 import shutil
 import subprocess
-import importlib
-import importlib.util
+import json
 from pathlib import Path
+
+# ─── Konfigurationsverzeichnis ──────────────────────────────────────────
+CONFIG_DIR = Path.home() / ".config" / "chntpw-gui"
+CONFIG_FILE = CONFIG_DIR / "config.json"
+
+def load_config():
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                return json.load(f)
+        except:
+            pass
+    return {"language": "de"}
+
+def save_config(config):
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    with open(CONFIG_FILE, "w") as f:
+        json.dump(config, f, indent=2)
+
+# ─── Übersetzungen ──────────────────────────────────────────────────────
+LANGUAGES = {
+    "de": {
+        "window_title": "Windows Passwort Finder – {distro}",
+        "title_label": "🔐  Windows Passwort Finder",
+        "subtitle_label": "Benutzer anzeigen · Passwort zurücksetzen/ändern  ·  {distro}",
+        "distro_info": "🐧  {name}  ·  chntpw: {chntpw}  ·  udisksctl: {udisksctl}",
+        "hint_text": (
+            "• Dieses Tool zeigt die Benutzernamen der Windows‑SAM‑Datei an.\n"
+            "• Das aktuelle Passwort kann nicht angezeigt werden (es ist gehasht).\n"
+            "• Mit 'Passwort zurücksetzen/ändern' können Sie ein neues Passwort setzen.\n"
+            "• Lassen Sie das Passwort-Feld leer, wird das Passwort entfernt (leer).\n"
+            "• Für alle Aktionen werden Administrator‑Rechte benötigt (pkexec/sudo)."
+        ),
+        "section_partitions": "Windows‑Partitionen",
+        "btn_refresh": "Partitionen neu scannen",
+        "btn_mount": "Ausgewählte Partition mounten & Benutzer anzeigen",
+        "btn_reset": "Passwort zurücksetzen/ändern",
+        "section_log": "Ausgabe",
+        "log_placeholder": "Hier erscheint die Ausgabe der Aktionen …",
+        "menu_file": "Datei",
+        "menu_settings": "Einstellungen",
+        "menu_help": "Hilfe",
+        "menu_anleitung": "Anleitung",
+        "menu_about": "Über",
+        "settings_title": "Einstellungen",
+        "settings_language": "Sprache:",
+        "settings_lang_de": "Deutsch",
+        "settings_lang_en": "Englisch",
+        "settings_ok": "OK",
+        "settings_cancel": "Abbrechen",
+        "help_title": "Anleitung",
+        "help_text": (
+            "<h2>📖 Anleitung – Windows Passwort Finder</h2>"
+            "<p>Mit diesem Tool können Sie die Passwörter von lokalen Windows‑Benutzern zurücksetzen oder ändern.</p>"
+            "<h3>Schritt für Schritt:</h3>"
+            "<ol>"
+            "<li><b>Windows‑Partition auswählen:</b> Die Liste zeigt alle erkannten NTFS/FAT‑Partitionen an. "
+            "Klicken Sie auf die gewünschte Partition (meist die größte).</li>"
+            "<li><b>Mounten (falls nötig):</b> Klicken Sie auf <i>„Ausgewählte Partition mounten & Benutzer anzeigen“</i>. "
+            "Sie werden nach Ihrem Administrator‑Passwort gefragt (über pkexec oder sudo).</li>"
+            "<li><b>Benutzerliste anzeigen:</b> Nach erfolgreichem Mount wird die SAM‑Datei ausgelesen und "
+            "die Benutzernamen werden angezeigt.</li>"
+            "<li><b>Passwort zurücksetzen oder ändern:</b> Klicken Sie auf <i>„Passwort zurücksetzen/ändern“</i>. "
+            "Geben Sie den Benutzernamen ein und entweder ein neues Passwort oder lassen Sie das Feld leer, "
+            "um das Passwort zu entfernen (leeres Passwort).</li>"
+            "<li><b>Abmelden oder Neustart:</b> Damit die Änderungen wirksam werden, müssen Sie sich abmelden "
+            "oder das System neu starten.</li>"
+            "</ol>"
+            "<h3>Wichtige Hinweise:</h3>"
+            "<ul>"
+            "<li>Das aktuelle Passwort kann <b>nicht</b> angezeigt werden (es ist gehasht).</li>"
+            "<li>Das Tool funktioniert nur für <b>lokale</b> Windows‑Benutzer (keine Domänen‑Benutzer).</li>"
+            "<li>Bei <b>BitLocker‑verschlüsselten</b> Partitionen ist die SAM‑Datei nicht lesbar.</li>"
+            "<li>Alle Aktionen erfordern Administrator‑Rechte (pkexec/sudo).</li>"
+            "</ul>"
+            "<p>Bei Problemen lesen Sie bitte die <a href='https://github.com/yourusername/windows-passwort-finder#readme'>Dokumentation</a>.</p>"
+        ),
+        "about_title": "Über",
+        "about_text": (
+            "<h2>Windows Passwort Finder</h2>"
+            "<p><b>Version:</b> 1.06</p>"
+            "<p>Eine grafische Oberfläche für das Tool <b>chntpw</b>.</p>"
+            "<p>Entwickelt mit PyQt6 und der Liebe zur Open‑Source‑Community.</p>"
+            "<p>© 2025 – Ihr Name</p>"
+            "<p><a href='https://github.com/yourusername/windows-passwort-finder'>GitHub-Repository</a></p>"
+        ),
+        "pw_dialog_title": "Passwort zurücksetzen / ändern",
+        "pw_username": "Benutzername:",
+        "pw_new_password": "Neues Passwort (leer = Passwort löschen):",
+        "pw_hint": "Hinweis: Wenn Sie das Passwort-Feld leer lassen, wird das Passwort entfernt (leeres Passwort).",
+        "err_no_partition": "Keine Windows‑Partitionen gefunden.",
+        "err_no_sam": "In {path} wurde keine SAM‑Datei gefunden.\nMöglicherweise ist es keine Windows‑Systempartition.",
+        "err_mount_failed": "Mountfehler",
+        "err_mount_detail": "Fehler beim Mounten von {device}:\n{error}",
+        "err_mount_point": "Mountpunkt konnte nicht ermittelt werden.",
+        "err_sam_not_found": "Keine SAM‑Datei gefunden. Bitte zuerst eine Partition auswählen.",
+        "err_username_empty": "Der Benutzername darf nicht leer sein.",
+        "err_chntpw_failed": "Fehler beim Auslesen",
+        "err_reset_failed": "Fehler beim Zurücksetzen",
+        "info_select_partition": "Bitte wählen Sie eine Partition aus.",
+        "info_mount_confirm": "Soll die Partition {device} gemountet werden?\nDazu werden Administrator‑Rechte benötigt.",
+        "info_reset_confirm": "Das Passwort für Benutzer '{username}' wird {action}\n\nFortfahren?",
+        "info_reset_set": "auf '{password}' gesetzt",
+        "info_reset_remove": "entfernt (leeres Passwort)",
+        "info_reset_success": "Passwort für Benutzer '{username}' wurde erfolgreich gesetzt.\n\n{output}",
+        "info_reset_changed": "✅  Passwort für '{username}' erfolgreich geändert.",
+        "info_reset_cleared": "✅  Passwort für '{username}' erfolgreich geleert.",
+        "info_log_sam": "📂  SAM‑Datei: {path}",
+        "info_log_userlist": "📋  Benutzerliste:\n{output}",
+        "info_log_reset": "🔄  Setze Passwort für '{username}' …",
+        "info_log_error": "❌  Fehler: {error}",
+    },
+    "en": {
+        "window_title": "Windows Password Finder – {distro}",
+        "title_label": "🔐  Windows Password Finder",
+        "subtitle_label": "Show users · Reset/change password  ·  {distro}",
+        "distro_info": "🐧  {name}  ·  chntpw: {chntpw}  ·  udisksctl: {udisksctl}",
+        "hint_text": (
+            "• This tool shows the usernames from the Windows SAM file.\n"
+            "• The current password cannot be displayed (it is hashed).\n"
+            "• With 'Reset/change password' you can set a new password.\n"
+            "• Leave the password field empty to remove the password (empty).\n"
+            "• All actions require administrator privileges (pkexec/sudo)."
+        ),
+        "section_partitions": "Windows Partitions",
+        "btn_refresh": "Rescan partitions",
+        "btn_mount": "Mount selected partition & show users",
+        "btn_reset": "Reset/change password",
+        "section_log": "Output",
+        "log_placeholder": "Output of actions will appear here …",
+        "menu_file": "File",
+        "menu_settings": "Settings",
+        "menu_help": "Help",
+        "menu_anleitung": "Instructions",
+        "menu_about": "About",
+        "settings_title": "Settings",
+        "settings_language": "Language:",
+        "settings_lang_de": "German",
+        "settings_lang_en": "English",
+        "settings_ok": "OK",
+        "settings_cancel": "Cancel",
+        "help_title": "Instructions",
+        "help_text": (
+            "<h2>📖 Instructions – Windows Password Finder</h2>"
+            "<p>This tool allows you to reset or change passwords of local Windows users.</p>"
+            "<h3>Step by step:</h3>"
+            "<ol>"
+            "<li><b>Select Windows partition:</b> The list shows all detected NTFS/FAT partitions. "
+            "Click on the desired partition (usually the largest one).</li>"
+            "<li><b>Mount (if needed):</b> Click on <i>„Mount selected partition & show users“</i>. "
+            "You will be asked for your administrator password (via pkexec or sudo).</li>"
+            "<li><b>Show user list:</b> After successful mounting, the SAM file is read and the "
+            "usernames are displayed.</li>"
+            "<li><b>Reset or change password:</b> Click on <i>„Reset/change password“</i>. "
+            "Enter the username and either a new password or leave the field empty to "
+            "remove the password (empty password).</li>"
+            "<li><b>Logout or restart:</b> For the changes to take effect, you must log out "
+            "or restart the system.</li>"
+            "</ol>"
+            "<h3>Important notes:</h3>"
+            "<ul>"
+            "<li>The current password <b>cannot</b> be displayed (it is hashed).</li>"
+            "<li>This tool works only for <b>local</b> Windows users (no domain users).</li>"
+            "<li>On <b>BitLocker‑encrypted</b> partitions, the SAM file is not readable.</li>"
+            "<li>All actions require administrator privileges (pkexec/sudo).</li>"
+            "</ul>"
+            "<p>If you encounter issues, please read the <a href='https://github.com/yourusername/windows-passwort-finder#readme'>documentation</a>.</p>"
+        ),
+        "about_title": "About",
+        "about_text": (
+            "<h2>Windows Password Finder</h2>"
+            "<p><b>Version:</b> 1.06</p>"
+            "<p>A graphical interface for the <b>chntpw</b> tool.</p>"
+            "<p>Developed with PyQt6 and love for the open‑source community.</p>"
+            "<p>© 2025 – Your Name</p>"
+            "<p><a href='https://github.com/yourusername/windows-passwort-finder'>GitHub Repository</a></p>"
+        ),
+        "pw_dialog_title": "Reset / change password",
+        "pw_username": "Username:",
+        "pw_new_password": "New password (empty = remove password):",
+        "pw_hint": "Hint: If you leave the password field empty, the password will be removed (empty).",
+        "err_no_partition": "No Windows partitions found.",
+        "err_no_sam": "No SAM file found in {path}.\nPossibly not a Windows system partition.",
+        "err_mount_failed": "Mount error",
+        "err_mount_detail": "Error mounting {device}:\n{error}",
+        "err_mount_point": "Could not determine mount point.",
+        "err_sam_not_found": "No SAM file found. Please select a partition first.",
+        "err_username_empty": "Username cannot be empty.",
+        "err_chntpw_failed": "Error reading",
+        "err_reset_failed": "Error resetting",
+        "info_select_partition": "Please select a partition.",
+        "info_mount_confirm": "Mount partition {device}?\nAdministrator privileges are required.",
+        "info_reset_confirm": "The password for user '{username}' will be {action}\n\nContinue?",
+        "info_reset_set": "set to '{password}'",
+        "info_reset_remove": "removed (empty password)",
+        "info_reset_success": "Password for user '{username}' was successfully set.\n\n{output}",
+        "info_reset_changed": "✅  Password for '{username}' successfully changed.",
+        "info_reset_cleared": "✅  Password for '{username}' successfully cleared.",
+        "info_log_sam": "📂  SAM file: {path}",
+        "info_log_userlist": "📋  User list:\n{output}",
+        "info_log_reset": "🔄  Setting password for '{username}' …",
+        "info_log_error": "❌  Error: {error}",
+    }
+}
+
+current_lang = "de"
+
+def tr(key, **kwargs):
+    text = LANGUAGES.get(current_lang, {}).get(key, key)
+    if kwargs:
+        try:
+            return text.format(**kwargs)
+        except KeyError:
+            return text
+    return text
 
 # ─── Distribution erkennen ──────────────────────────────────────────────
 def detect_distro():
@@ -55,7 +270,6 @@ def get_system_install_commands():
     }
     return cmds.get(distro, None)
 
-# ─── Hilfsfunktionen für Installation ──────────────────────────────────
 def run_command(cmd, description="Befehl", check=True):
     print(f"▶ {description} …")
     try:
@@ -92,7 +306,6 @@ def install_system_packages():
     print(f"   Befehl: {cmd}")
     return run_command(cmd, "Systempaket-Installation")
 
-# ─── Hauptprüfung ──────────────────────────────────────────────────────
 def ensure_dependencies():
     missing = []
     try:
@@ -136,7 +349,6 @@ def ensure_dependencies():
             print("❌ Systempakete konnten nicht installiert werden.")
             return False
 
-    # Nachinstallation prüfen
     if not shutil.which("chntpw") or not shutil.which("udisksctl"):
         print("⚠ Nach der Installation immer noch nicht gefunden. Bitte manuell nachhelfen.")
         return False
@@ -150,23 +362,27 @@ def ensure_dependencies():
     print("\n✅ Alle Abhängigkeiten erfolgreich installiert.")
     return True
 
-# ─── GUI-Code (wie zuvor, aber jetzt innerhalb von main) ──────────────
+# ─── GUI-Code ──────────────────────────────────────────────────────────
 def main():
+    global current_lang
+    config = load_config()
+    current_lang = config.get("language", "de")
+
     if not ensure_dependencies():
         sys.exit(1)
 
-    # Jetzt PyQt6 importieren
     from PyQt6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
         QListWidget, QListWidgetItem, QPushButton, QLabel, QTextEdit,
         QFrame, QMessageBox, QDialog, QDialogButtonBox, QLineEdit, QFormLayout,
-        QProgressBar
+        QProgressBar, QComboBox
     )
     from PyQt6.QtCore import Qt, QThread, pyqtSignal
+    from PyQt6.QtGui import QAction
 
-    # ─── Hilfsfunktionen für Windows-Erkennung ──────────────────────
     import json
 
+    # ─── Hilfsfunktionen für Windows-Erkennung ──────────────────────
     def get_windows_partitions():
         try:
             output = subprocess.check_output(
@@ -325,6 +541,45 @@ def main():
     color: {text_primary};
 }}
 QWidget {{ background-color: {bg_page}; }}
+
+/* ─── Menüleiste ─── */
+QMenuBar {{
+    background-color: {bg_header};
+    color: {text_primary};
+    font-size: 14px;
+    padding: 2px 8px;
+    border-bottom: 1px solid {border_card};
+}}
+QMenuBar::item {{
+    background-color: transparent;
+    padding: 6px 14px;
+    border-radius: 4px;
+}}
+QMenuBar::item:selected {{
+    background-color: {accent_light};
+    color: {accent};
+}}
+QMenuBar::item:pressed {{
+    background-color: {accent_light};
+}}
+QMenu {{
+    background-color: {bg_card};
+    border: 1px solid {border_card};
+    border-radius: 6px;
+    padding: 4px;
+}}
+QMenu::item {{
+    background-color: transparent;
+    padding: 6px 24px 6px 12px;
+    border-radius: 4px;
+    color: {text_primary};
+}}
+QMenu::item:selected {{
+    background-color: {accent_light};
+    color: {accent};
+}}
+
+/* ─── Übrige Elemente ─── */
 QFrame#distroBar {{
     background-color: {bg_distro};
     border: 1px solid {border_distro};
@@ -430,31 +685,45 @@ QProgressBar::chunk {{ background-color: {accent}; border-radius: 6px; }}
         dlg.setIcon(QMessageBox.Icon.Warning)
         dlg.setText(text)
         dlg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
-        dlg.button(QMessageBox.StandardButton.Yes).setText("Ja, jetzt")
-        dlg.button(QMessageBox.StandardButton.Cancel).setText("Abbrechen")
+        dlg.button(QMessageBox.StandardButton.Yes).setText(tr("settings_ok"))
+        dlg.button(QMessageBox.StandardButton.Cancel).setText(tr("settings_cancel"))
         return dlg.exec() == QMessageBox.StandardButton.Yes
 
     class PasswordDialog(QDialog):
         def __init__(self, parent=None):
             super().__init__(parent)
-            self.setWindowTitle("Passwort zurücksetzen / ändern")
             self.setMinimumWidth(400)
             layout = QVBoxLayout(self)
             form = QFormLayout()
+            self.username_label = QLabel(tr("pw_username"))
+            self.password_label = QLabel(tr("pw_new_password"))
             self.username_edit = QLineEdit()
             self.password_edit = QLineEdit()
             self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
-            form.addRow("Benutzername:", self.username_edit)
-            form.addRow("Neues Passwort (leer = Passwort löschen):", self.password_edit)
+            form.addRow(self.username_label, self.username_edit)
+            form.addRow(self.password_label, self.password_edit)
             layout.addLayout(form)
-            hint = QLabel("Hinweis: Wenn Sie das Passwort-Feld leer lassen, wird das Passwort entfernt (leeres Passwort).")
-            hint.setWordWrap(True)
-            hint.setStyleSheet("color: #6b7280; font-size: 12px;")
-            layout.addWidget(hint)
+            self.hint_label = QLabel(tr("pw_hint"))
+            self.hint_label.setWordWrap(True)
+            self.hint_label.setStyleSheet("color: #6b7280; font-size: 12px;")
+            layout.addWidget(self.hint_label)
             buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
             buttons.accepted.connect(self.accept)
             buttons.rejected.connect(self.reject)
             layout.addWidget(buttons)
+            self.setWindowTitle(tr("pw_dialog_title"))
+            self.ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+            self.cancel_button = buttons.button(QDialogButtonBox.StandardButton.Cancel)
+            self.ok_button.setText(tr("settings_ok"))
+            self.cancel_button.setText(tr("settings_cancel"))
+
+        def retranslate(self):
+            self.setWindowTitle(tr("pw_dialog_title"))
+            self.username_label.setText(tr("pw_username"))
+            self.password_label.setText(tr("pw_new_password"))
+            self.hint_label.setText(tr("pw_hint"))
+            self.ok_button.setText(tr("settings_ok"))
+            self.cancel_button.setText(tr("settings_cancel"))
 
         def get_data(self):
             return self.username_edit.text().strip(), self.password_edit.text()
@@ -463,14 +732,52 @@ QProgressBar::chunk {{ background-color: {accent}; border-radius: 6px; }}
     class MainWindow(QMainWindow):
         def __init__(self):
             super().__init__()
-            self.setWindowTitle(f"Windows Passwort Finder – {DISTRO_NAME}")
             self.setMinimumSize(900, 700)
             self.current_sam_path = None
             self.partitions = []
             self._theme_name = "light"
             self._setup_ui()
+            self._setup_menu()
             self._apply_theme()
+            self.retranslate_ui()
             self.refresh_partitions()
+
+        def _setup_menu(self):
+            menubar = self.menuBar()
+            self.file_menu = menubar.addMenu(tr("menu_file"))
+            self.settings_action = QAction(tr("menu_settings"), self)
+            self.settings_action.triggered.connect(self.show_settings)
+            self.file_menu.addAction(self.settings_action)
+
+            self.help_menu = menubar.addMenu(tr("menu_help"))
+            self.anleitung_action = QAction(tr("menu_anleitung"), self)
+            self.anleitung_action.triggered.connect(self.show_help)
+            self.help_menu.addAction(self.anleitung_action)
+            self.help_menu.addSeparator()
+            self.about_action = QAction(tr("menu_about"), self)
+            self.about_action.triggered.connect(self.show_about)
+            self.help_menu.addAction(self.about_action)
+
+        def retranslate_ui(self):
+            self.setWindowTitle(tr("window_title", distro=DISTRO_NAME))
+            self.title_label.setText(tr("title_label"))
+            self.subtitle_label.setText(tr("subtitle_label", distro=DISTRO_NAME))
+            self.distro_label.setText(tr("distro_info",
+                                         name=DISTRO_NAME,
+                                         chntpw='✔' if shutil.which('chntpw') else '✗',
+                                         udisksctl='✔' if shutil.which('udisksctl') else '✗'))
+            self.hint_label.setText(tr("hint_text"))
+            self.section_partitions_label.setText(tr("section_partitions"))
+            self.refresh_btn.setText(tr("btn_refresh"))
+            self.mount_btn.setText(tr("btn_mount"))
+            self.reset_btn.setText(tr("btn_reset"))
+            self.section_log_label.setText(tr("section_log"))
+            self.log.setPlaceholderText(tr("log_placeholder"))
+            self.file_menu.setTitle(tr("menu_file"))
+            self.settings_action.setText(tr("menu_settings"))
+            self.help_menu.setTitle(tr("menu_help"))
+            self.anleitung_action.setText(tr("menu_anleitung"))
+            self.about_action.setText(tr("menu_about"))
 
         def _setup_ui(self):
             central = QWidget()
@@ -481,19 +788,18 @@ QProgressBar::chunk {{ background-color: {accent}; border-radius: 6px; }}
 
             # Header
             hdr = QHBoxLayout()
-            title = QLabel("🔐  Windows Passwort Finder")
-            title.setObjectName("title")
-            sub = QLabel(f"Benutzer anzeigen · Passwort zurücksetzen/ändern  ·  {DISTRO_NAME}")
-            sub.setObjectName("subtitle")
-            sub.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.btn_theme = QPushButton("🌙")
+            self.title_label = QLabel()
+            self.title_label.setObjectName("title")
+            self.subtitle_label = QLabel()
+            self.subtitle_label.setObjectName("subtitle")
+            self.subtitle_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.btn_theme = QPushButton()
             self.btn_theme.setObjectName("btnTheme")
             self.btn_theme.setFixedSize(40, 36)
-            self.btn_theme.setToolTip("Dunkles Design aktivieren")
             self.btn_theme.clicked.connect(self._toggle_theme)
-            hdr.addWidget(title)
+            hdr.addWidget(self.title_label)
             hdr.addStretch()
-            hdr.addWidget(sub)
+            hdr.addWidget(self.subtitle_label)
             hdr.addWidget(self.btn_theme)
             root.addLayout(hdr)
 
@@ -502,28 +808,22 @@ QProgressBar::chunk {{ background-color: {accent}; border-radius: 6px; }}
             distro_bar.setObjectName("distroBar")
             db_layout = QHBoxLayout(distro_bar)
             db_layout.setContentsMargins(12, 8, 12, 8)
-            info_text = f"🐧  {DISTRO_NAME}  ·  chntpw: {'✔' if shutil.which('chntpw') else '✗'}  ·  udisksctl: {'✔' if shutil.which('udisksctl') else '✗'}"
-            distro_lbl = QLabel(info_text)
-            distro_lbl.setObjectName("distroInfo")
-            db_layout.addWidget(distro_lbl)
+            self.distro_label = QLabel()
+            self.distro_label.setObjectName("distroInfo")
+            db_layout.addWidget(self.distro_label)
             root.addWidget(distro_bar)
             root.addWidget(make_divider(self._theme_name))
 
-            # Hinweis (ohne Karte)
-            hint_text = QLabel(
-                "• Dieses Tool zeigt die Benutzernamen der Windows‑SAM‑Datei an.\n"
-                "• Das aktuelle Passwort kann nicht angezeigt werden (es ist gehasht).\n"
-                "• Mit 'Passwort zurücksetzen/ändern' können Sie ein neues Passwort setzen.\n"
-                "• Lassen Sie das Passwort-Feld leer, wird das Passwort entfernt (leer).\n"
-                "• Für alle Aktionen werden Administrator‑Rechte benötigt (pkexec/sudo)."
-            )
-            hint_text.setObjectName("hint")
-            hint_text.setWordWrap(True)
-            root.addWidget(hint_text)
+            # Hinweis
+            self.hint_label = QLabel()
+            self.hint_label.setObjectName("hint")
+            self.hint_label.setWordWrap(True)
+            root.addWidget(self.hint_label)
             root.addWidget(make_divider(self._theme_name))
 
-            # Partitionenliste (ohne Karte)
-            root.addWidget(make_section_label("Windows‑Partitionen"))
+            # Partitionenliste
+            self.section_partitions_label = make_section_label("")
+            root.addWidget(self.section_partitions_label)
             self.list_widget = QListWidget()
             self.list_widget.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
             root.addWidget(self.list_widget)
@@ -533,14 +833,14 @@ QProgressBar::chunk {{ background-color: {accent}; border-radius: 6px; }}
 
             # Buttons
             btn_row = QHBoxLayout()
-            self.refresh_btn = QPushButton("Partitionen neu scannen")
+            self.refresh_btn = QPushButton()
             self.refresh_btn.setObjectName("btnSmall")
             self.refresh_btn.clicked.connect(self.refresh_partitions)
-            self.mount_btn = QPushButton("Ausgewählte Partition mounten & Benutzer anzeigen")
+            self.mount_btn = QPushButton()
             self.mount_btn.setObjectName("btnMount")
             self.mount_btn.setEnabled(False)
             self.mount_btn.clicked.connect(self.on_mount_clicked)
-            self.reset_btn = QPushButton("Passwort zurücksetzen/ändern")
+            self.reset_btn = QPushButton()
             self.reset_btn.setObjectName("btnReset")
             self.reset_btn.setEnabled(False)
             self.reset_btn.clicked.connect(self.on_reset_clicked)
@@ -551,11 +851,11 @@ QProgressBar::chunk {{ background-color: {accent}; border-radius: 6px; }}
             root.addWidget(make_divider(self._theme_name))
 
             # Log
-            root.addWidget(make_section_label("Ausgabe"))
+            self.section_log_label = make_section_label("")
+            root.addWidget(self.section_log_label)
             self.log = QTextEdit()
             self.log.setReadOnly(True)
             self.log.setMinimumHeight(150)
-            self.log.setPlaceholderText("Hier erscheint die Ausgabe der Aktionen …")
             root.addWidget(self.log)
 
         def _apply_theme(self):
@@ -568,6 +868,55 @@ QProgressBar::chunk {{ background-color: {accent}; border-radius: 6px; }}
             self._theme_name = "dark" if self._theme_name == "light" else "light"
             self._apply_theme()
 
+        # ─── Einstellungen ─────────────────────────────────────────────
+        def show_settings(self):
+            global current_lang
+            dialog = QDialog(self)
+            dialog.setWindowTitle(tr("settings_title"))
+            layout = QVBoxLayout(dialog)
+
+            lang_layout = QHBoxLayout()
+            lang_label = QLabel(tr("settings_language"))
+            lang_combo = QComboBox()
+            lang_combo.addItem(tr("settings_lang_de"), "de")
+            lang_combo.addItem(tr("settings_lang_en"), "en")
+            idx = lang_combo.findData(current_lang)
+            if idx >= 0:
+                lang_combo.setCurrentIndex(idx)
+            lang_layout.addWidget(lang_label)
+            lang_layout.addWidget(lang_combo)
+            layout.addLayout(lang_layout)
+
+            buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+            buttons.accepted.connect(dialog.accept)
+            buttons.rejected.connect(dialog.reject)
+            layout.addWidget(buttons)
+
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                new_lang = lang_combo.currentData()
+                if new_lang != current_lang:
+                    current_lang = new_lang
+                    save_config({"language": current_lang})
+                    self.retranslate_ui()
+
+        # ─── Hilfe ─────────────────────────────────────────────────────
+        def show_help(self):
+            help_text = tr("help_text")
+            dlg = QMessageBox(self)
+            dlg.setWindowTitle(tr("help_title"))
+            dlg.setText("")
+            text_edit = QTextEdit()
+            text_edit.setHtml(help_text)
+            text_edit.setReadOnly(True)
+            text_edit.setMinimumSize(600, 400)
+            dlg.layout().addWidget(text_edit, 0, 0, 1, dlg.layout().columnCount())
+            dlg.exec()
+
+        def show_about(self):
+            about_text = tr("about_text")
+            QMessageBox.about(self, tr("about_title"), about_text)
+
+        # ─── Partitionen laden ─────────────────────────────────────────
         def refresh_partitions(self):
             self.progress.setVisible(True)
             self.progress.setRange(0, 0)
@@ -586,7 +935,7 @@ QProgressBar::chunk {{ background-color: {accent}; border-radius: 6px; }}
             self.partitions = partitions
             self.list_widget.clear()
             if not partitions:
-                self.list_widget.addItem("Keine Windows‑Partitionen gefunden.")
+                self.list_widget.addItem(tr("err_no_partition"))
                 self.mount_btn.setEnabled(False)
                 self.reset_btn.setEnabled(False)
                 return
@@ -608,12 +957,13 @@ QProgressBar::chunk {{ background-color: {accent}; border-radius: 6px; }}
         def on_worker_error(self, error_msg):
             self.progress.setVisible(False)
             self.refresh_btn.setEnabled(True)
-            QMessageBox.critical(self, "Fehler", f"Fehler beim Scannen:\n{error_msg}")
+            QMessageBox.critical(self, tr("err_mount_failed"), f"{tr('err_mount_detail', device='', error=error_msg)}")
 
+        # ─── Mount ─────────────────────────────────────────────────────
         def on_mount_clicked(self):
             selected = self.list_widget.currentItem()
             if not selected:
-                QMessageBox.information(self, "Hinweis", "Bitte wählen Sie eine Partition aus.")
+                QMessageBox.information(self, tr("info_select_partition"), tr("info_select_partition"))
                 return
             part = selected.data(Qt.ItemDataRole.UserRole)
             if not part:
@@ -626,13 +976,10 @@ QProgressBar::chunk {{ background-color: {accent}; border-radius: 6px; }}
                     self.show_user_list(sam_path)
                     return
                 else:
-                    QMessageBox.critical(self, "Fehler",
-                                         f"In {mountpoint} wurde keine SAM‑Datei gefunden.\n"
-                                         "Möglicherweise ist es keine Windows‑Systempartition.")
+                    QMessageBox.critical(self, tr("err_no_sam"), tr("err_no_sam", path=mountpoint))
                     return
-            reply = QMessageBox.question(self, "Mounten",
-                                         f"Soll die Partition {device} gemountet werden?\n"
-                                         "Dazu werden Administrator‑Rechte benötigt.",
+            reply = QMessageBox.question(self, tr("info_mount_confirm", device=device),
+                                         tr("info_mount_confirm", device=device),
                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if reply != QMessageBox.StandardButton.Yes:
                 return
@@ -653,70 +1000,71 @@ QProgressBar::chunk {{ background-color: {accent}; border-radius: 6px; }}
                 return
             mount_path, error = result
             if error:
-                QMessageBox.critical(self, "Mountfehler", f"Fehler beim Mounten von {device}:\n{error}")
+                QMessageBox.critical(self, tr("err_mount_failed"), tr("err_mount_detail", device=device, error=error))
                 return
             if not mount_path:
-                QMessageBox.critical(self, "Mountfehler", "Mountpunkt konnte nicht ermittelt werden.")
+                QMessageBox.critical(self, tr("err_mount_failed"), tr("err_mount_point"))
                 return
             sam_path = find_sam_file_on_mount(mount_path)
             if sam_path:
                 self.show_user_list(sam_path)
                 self.refresh_partitions()
             else:
-                QMessageBox.critical(self, "Fehler",
-                                     f"In {mount_path} wurde keine SAM‑Datei gefunden.\n"
-                                     "Bitte prüfen Sie, ob die Partition wirklich Windows enthält.")
+                QMessageBox.critical(self, tr("err_no_sam"), tr("err_no_sam", path=mount_path))
 
+        # ─── Benutzerliste ────────────────────────────────────────────
         def show_user_list(self, sam_path):
             self.current_sam_path = sam_path
             self.reset_btn.setEnabled(True)
-            self.log.append(f"📂  SAM‑Datei: {sam_path}")
+            self.log.append(tr("info_log_sam", path=sam_path))
             output, error = run_chntpw_command(["-l", sam_path])
             if error:
-                QMessageBox.critical(self, "Fehler beim Auslesen", error)
+                QMessageBox.critical(self, tr("err_chntpw_failed"), error)
                 return
-            self.log.append("📋  Benutzerliste:\n" + output)
+            self.log.append(tr("info_log_userlist", output=output))
             dialog = QMessageBox(self)
-            dialog.setWindowTitle("Benutzerliste")
-            dialog.setText(f"SAM-Datei: {sam_path}")
+            dialog.setWindowTitle(tr("section_partitions"))
+            dialog.setText(tr("info_log_sam", path=sam_path))
             text_edit = QTextEdit()
             text_edit.setPlainText(output)
             text_edit.setReadOnly(True)
             dialog.layout().addWidget(text_edit, 0, 0, 1, dialog.layout().columnCount())
             dialog.exec()
 
+        # ─── Passwort zurücksetzen ────────────────────────────────────
         def on_reset_clicked(self):
             if not self.current_sam_path:
-                QMessageBox.critical(self, "Fehler", "Keine SAM‑Datei gefunden. Bitte zuerst eine Partition auswählen.")
+                QMessageBox.critical(self, tr("err_sam_not_found"), tr("err_sam_not_found"))
                 return
             dialog = PasswordDialog(self)
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return
             username, new_password = dialog.get_data()
             if not username:
-                QMessageBox.warning(self, "Fehler", "Der Benutzername darf nicht leer sein.")
+                QMessageBox.warning(self, tr("err_username_empty"), tr("err_username_empty"))
                 return
             if new_password:
-                msg = f"Das Passwort für Benutzer '{username}' wird auf '{new_password}' gesetzt."
+                action = tr("info_reset_set", password=new_password)
             else:
-                msg = f"Das Passwort für Benutzer '{username}' wird entfernt (leeres Passwort)."
-            reply = QMessageBox.question(self, "Bestätigung",
-                                         msg + "\n\nFortfahren?",
+                action = tr("info_reset_remove")
+            reply = QMessageBox.question(self, tr("info_reset_confirm", username=username, action=action),
+                                         tr("info_reset_confirm", username=username, action=action),
                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if reply != QMessageBox.StandardButton.Yes:
                 return
-            self.log.append(f"🔄  Setze Passwort für '{username}' …")
+            self.log.append(tr("info_log_reset", username=username))
             cmd_args = ["-u", username, "-p", new_password, self.current_sam_path]
             output, error = run_chntpw_command(cmd_args)
             if error:
-                QMessageBox.critical(self, "Fehler beim Zurücksetzen", error)
-                self.log.append("❌  Fehler: " + error)
+                QMessageBox.critical(self, tr("err_reset_failed"), error)
+                self.log.append(tr("info_log_error", error=error))
             else:
                 if new_password:
-                    self.log.append(f"✅  Passwort für '{username}' erfolgreich geändert.")
+                    self.log.append(tr("info_reset_changed", username=username))
                 else:
-                    self.log.append(f"✅  Passwort für '{username}' erfolgreich geleert.")
-                QMessageBox.information(self, "Erfolg", f"Passwort für Benutzer '{username}' wurde erfolgreich gesetzt.\n\n{output}")
+                    self.log.append(tr("info_reset_cleared", username=username))
+                QMessageBox.information(self, tr("info_reset_success", username=username, output=output),
+                                        tr("info_reset_success", username=username, output=output))
 
     # ─── App starten ──────────────────────────────────────────────────
     app = QApplication(sys.argv)
