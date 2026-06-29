@@ -4,7 +4,7 @@
 
 ![image](https://img.shields.io/badge/Python-3.8+-blue?logo=python&logoColor=white)
 ![image](https://img.shields.io/badge/PyQt6-6.0+-green?logo=qt&logoColor=white)
-![image](https://img.shields.io/badge/License-GPL v3-blue.svg)
+![Lizenz](https://img.shields.io/badge/Lizenz-GPL--3.0-blue)
 ![image](https://img.shields.io/badge/Platform-Linux-lightgrey?logo=linux&logoColor=white)
 ![image](https://img.shields.io/badge/Version-1.06-orange)
 
