@@ -144,13 +144,13 @@ chmod +x chntpw-gui.py
 ### Hauptfenster (helles Design)
 
 
-![image](/home/manjaro/Downloads/screenshots/chntpw-gui-hell.webp)
+![image](/screenshots/chntpw-gui-hell.webp)
 
 
 ### Hauptfenster (dunkles Design)
 
 
-![image](/home/manjaro/Downloads/screenshots/chntpw-gui-dunkel.webp)
+![image](/screenshots/chntpw-gui-dunkel.webp)
 
 
 ## 🖥 Bedienung
